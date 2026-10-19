@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registro mediante código QR</title>
+  <style>
+    :root { --navy:#163b65; --blue:#1769aa; --light:#f3f7fb; --line:#d8e2ed; --green:#18794e; --red:#b42318; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:Arial,Helvetica,sans-serif; color:#182230; background:var(--light); }
+    header { background:var(--navy); color:white; padding:24px 16px; text-align:center; }
+    header h1 { margin:0 0 8px; font-size:clamp(1.4rem,4vw,2rem); }
+    header p { margin:0; opacity:.9; }
+    main { max-width:1100px; margin:22px auto; padding:0 14px 32px; }
+    .notice { background:#fff7e6; border:1px solid #f0ce7a; border-radius:10px; padding:12px 14px; margin-bottom:16px; line-height:1.45; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,330px),1fr)); gap:16px; }
+    section { background:white; border:1px solid var(--line); border-radius:14px; padding:18px; box-shadow:0 2px 8px #152b4410; min-width:0; }
+    h2 { color:var(--navy); font-size:1.15rem; margin:0 0 14px; }
+    label { display:block; font-weight:700; font-size:.92rem; margin:12px 0 6px; }
+    input, select { width:100%; padding:11px 12px; border:1px solid #b8c7d8; border-radius:8px; font:inherit; background:white; }
+    button { border:0; border-radius:8px; padding:11px 14px; cursor:pointer; font-weight:700; font-size:.95rem; background:var(--blue); color:white; }
+    button.secondary { background:#e8eef5; color:#173a5e; }
+    button.danger { background:#8e2a2a; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+    .status { margin-top:12px; padding:10px 12px; border-radius:8px; background:#eef4fa; overflow-wrap:anywhere; }
+    .status.ok { color:var(--green); background:#eaf7ef; }
+    .status.err { color:var(--red); background:#fff0ef; }
+    #qrcode { display:flex; justify-content:center; align-items:center; min-height:170px; padding:12px; }
+    #reader { width:100%; max-width:460px; margin:10px auto 0; }
+    .muted { color:#5b6877; font-size:.88rem; line-height:1.45; }
+    .table-wrap { overflow:auto; margin-top:12px; }
+    table { border-collapse:collapse; width:100%; min-width:700px; }
+    th,td { text-align:left; border-bottom:1px solid var(--line); padding:10px; font-size:.9rem; }
+    th { background:#eef4fa; color:#173a5e; position:sticky; top:0; }
+    .count { font-weight:700; color:var(--navy); }
+    footer { text-align:center; color:#687789; font-size:.85rem; padding:0 14px 24px; }
+    @media print { header, .no-print, .notice, footer { display:none!important; } body { background:white; } section { box-shadow:none; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Registro mediante código QR</h1>
+  <p>Registro en línea conectado a Firebase Firestore</p>
+</header>
+<main>
+  <div class="notice">
+    <strong>Privacidad y seguridad:</strong> esta versión está preparada como prototipo. La consulta pública de nombres y matrículas puede exponer datos personales. No publiques datos reales hasta configurar autenticación y reglas de Firestore adecuadas. No uses reglas abiertas de lectura/escritura en producción.
+  </div>
+
+  <div class="grid">
+    <section>
+      <h2>1. Crear un QR por persona</h2>
+      <p class="muted">Captura los datos de la persona. El QR contendrá solamente la matrícula/identificador, no el nombre completo.</p>
+      <label for="nombre">Nombre completo</label>
+      <input id="nombre" autocomplete="name" placeholder="Nombre y apellidos">
+      <label for="grupo">Grupo</label>
+      <input id="grupo" placeholder="Ej. 514">
+      <label for="matricula">Matrícula o identificador único</label>
+      <input id="matricula" placeholder="Ej. A001234">
+      <div class="actions no-print">
+        <button id="btnGenerar">Generar QR</button>
+        <button class="secondary" id="btnGuardarPersona">Guardar persona</button>
+      </div>
+      <div id="qrcode" aria-label="Código QR generado"></div>
+      <div id="qrTexto" class="muted"></div>
+      <div id="personaStatus" class="status" role="status">Configura Firebase y captura los datos para comenzar.</div>
+    </section>
+
+    <section>
+      <h2>2. Escanear QR y registrar</h2>
+      <p class="muted">Permite el acceso a la cámara cuando el navegador lo solicite. La cámara requiere HTTPS; GitHub Pages ya utiliza HTTPS.</p>
+      <div class="actions no-print">
+        <button id="btnIniciarEscaner">Iniciar cámara</button>
+        <button class="secondary" id="btnDetenerEscaner">Detener cámara</button>
+      </div>
+      <div id="reader"></div>
+      <label for="codigoManual">O escribe/pega el identificador del QR</label>
+      <input id="codigoManual" placeholder="MATRICULA:A001234">
+      <div class="actions no-print">
+        <button id="btnRegistrarManual">Registrar manualmente</button>
+      </div>
+      <div id="scanStatus" class="status" role="status">Aún no se ha registrado ningún escaneo.</div>
+    </section>
+  </div>
+
+  <section style="margin-top:16px">
+    <h2>3. Registros guardados</h2>
+    <p class="muted">Los registros se muestran desde Firestore en tiempo real. Esta tabla no incluye controles de edición ni eliminación.</p>
+    <div class="grid">
+      <div>
+        <label for="filtroGrupo">Filtrar por grupo</label>
+        <input id="filtroGrupo" placeholder="Todos los grupos">
+      </div>
+      <div>
+        <label for="filtroMatricula">Buscar matrícula o nombre</label>
+        <input id="filtroMatricula" placeholder="Buscar...">
+      </div>
+    </div>
+    <p class="count" id="contador">Registros: 0</p>
+    <div class="actions no-print">
+      <button id="btnExcel">Exportar resultados a Excel</button>
+      <button class="secondary" id="btnActualizar">Actualizar tabla</button>
+    </div>
+    <div id="tablaStatus" class="status" role="status">Esperando conexión con Firebase.</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Nombre</th><th>Grupo</th><th>Matrícula</th><th>Fecha</th><th>Hora</th><th>Tipo</th></tr></thead>
+        <tbody id="tbody"><tr><td colspan="6">No hay datos cargados.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<footer>Prototipo educativo · HTML, JavaScript y Firebase Firestore</footer>
+
+<!-- Bibliotecas para generar/leer QR y exportar Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import {
+    getFirestore, collection, addDoc, getDocs, query, orderBy, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+  // PASO 1: Reemplaza estos valores por los de tu proyecto Firebase.
+  const firebaseConfig = {
+    apiKey: "PEGA_AQUI_TU_API_KEY",
+    authDomain: "TU-PROYECTO.firebaseapp.com",
+    projectId: "TU-PROYECTO",
+    storageBucket: "TU-PROYECTO.firebasestorage.app",
+    messagingSenderId: "PEGA_AQUI_TU_SENDER_ID",
+    appId: "PEGA_AQUI_TU_APP_ID"
+  };
+
+  let db = null;
+  let scanner = null;
+  let registros = [];
+  let personaActual = null;
+  const $ = id => document.getElementById(id);
+
+  function firebaseConfigurado() {
+    return firebaseConfig.apiKey !== "PEGA_AQUI_TU_API_KEY" &&
+      firebaseConfig.projectId !== "TU-PROYECTO" &&
+      firebaseConfig.appId !== "PEGA_AQUI_TU_APP_ID";
+  }
+
+  if (firebaseConfigurado()) {
+    try {
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      $("tablaStatus").textContent = "Firebase inicializado. Cargando registros…";
+      cargarRegistros();
+    } catch (e) {
+      mostrarEstado("tablaStatus", "No se pudo inicializar Firebase: " + e.message, true);
+    }
+  } else {
+    $("tablaStatus").textContent = "Falta configurar firebaseConfig en el código.";
+  }
+
+  function mostrarEstado(id, mensaje, error=false) {
+    const el = $(id);
+    el.textContent = mensaje;
+    el.className = "status " + (error ? "err" : "ok");
+  }
+
+  function validarPersona() {
+    const nombre = $("nombre").value.trim();
+    const grupo = $("grupo").value.trim();
+    const matricula = $("matricula").value.trim();
+    if (!nombre || !grupo || !matricula) {
+      mostrarEstado("personaStatus", "Completa nombre, grupo y matrícula.", true);
+      return null;
+    }
+    return { nombre, grupo, matricula };
+  }
+
+  function payloadQR(matricula) { return "MATRICULA:" + matricula; }
+
+  $("btnGenerar").addEventListener("click", () => {
+    const p = validarPersona();
+    if (!p) return;
+    personaActual = p;
+    $("qrcode").innerHTML = "";
+    new QRCode($("qrcode"), {
+      text: payloadQR(p.matricula),
+      width: 190, height: 190,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+    $("qrTexto").textContent = "Contenido del QR: " + payloadQR(p.matricula);
+    mostrarEstado("personaStatus", "QR generado. Para registrar a la persona en la base de datos, pulsa «Guardar persona».");
+  });
+
+  $("btnGuardarPersona").addEventListener("click", async () => {
+    if (!db) return mostrarEstado("personaStatus", "Primero configura Firebase en el código.", true);
+    const p = validarPersona();
+    if (!p) return;
+    try {
+      await addDoc(collection(db, "personas"), {
+        ...p, creadoEn: serverTimestamp()
+      });
+      personaActual = p;
+      mostrarEstado("personaStatus", "Persona guardada en Firestore. El QR usa el identificador " + p.matricula + ".");
+      await cargarRegistros();
+    } catch (e) {
+      mostrarEstado("personaStatus", "No se pudo guardar. Revisa la configuración y las reglas de Firestore: " + e.message, true);
+    }
+  });
+
+  async function registrarQR(texto) {
+    if (!db) return mostrarEstado("scanStatus", "Primero configura Firebase.", true);
+    const raw = String(texto || "").trim();
+    const matricula = raw.startsWith("MATRICULA:") ? raw.slice("MATRICULA:".length).trim() : raw;
+    if (!matricula) return mostrarEstado("scanStatus", "El QR no contiene una matrícula válida.", true);
+    try {
+      const personasSnap = await getDocs(query(collection(db, "personas")));
+      const personaDoc = personasSnap.docs.find(d => String(d.data().matricula).toLowerCase() === matricula.toLowerCase());
+      if (!personaDoc) {
+        return mostrarEstado("scanStatus", "No se encontró una persona con matrícula " + matricula + ". Regístrala primero.", true);
+      }
+      const p = personaDoc.data();
+      const ahora = new Date();
+      const fecha = ahora.toLocaleDateString("en-CA");
+      const hora = ahora.toLocaleTimeString("es-MX", { hour12: false });
+      await addDoc(collection(db, "registros"), {
+        nombre: p.nombre, grupo: p.grupo, matricula: p.matricula,
+        fecha, hora, tipo: "QR", creadoEn: serverTimestamp()
+      });
+      mostrarEstado("scanStatus", "Registro guardado: " + p.nombre + " · Grupo " + p.grupo + " · " + fecha + " " + hora);
+      await cargarRegistros();
+    } catch (e) {
+      mostrarEstado("scanStatus", "No se pudo guardar el registro. Revisa las reglas de Firestore: " + e.message, true);
+    }
+  }
+
+  $("btnRegistrarManual").addEventListener("click", () => registrarQR($("codigoManual").value));
+  $("btnIniciarEscaner").addEventListener("click", async () => {
+    if (scanner) return;
+    if (!window.Html5Qrcode) return mostrarEstado("scanStatus", "No se pudo cargar la biblioteca del escáner.", true);
+    try {
+      scanner = new Html5Qrcode("reader");
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: { width: 230, height: 230 } },
+        decodedText => {
+          scanner.stop().catch(() => {});
+          scanner = null;
+          $("codigoManual").value = decodedText;
+          registrarQR(decodedText);
+        },
+        () => {}
+      );
+      mostrarEstado("scanStatus", "Cámara activa. Coloca el código QR dentro del recuadro.");
+    } catch (e) {
+      scanner = null;
+      mostrarEstado("scanStatus", "No se pudo iniciar la cámara. Verifica permisos y que la página use HTTPS: " + e.message, true);
+    }
+  });
+  $("btnDetenerEscaner").addEventListener("click", async () => {
+    if (scanner) {
+      try { await scanner.stop(); await scanner.clear(); } catch (_) {}
+      scanner = null;
+    }
+    mostrarEstado("scanStatus", "Escáner detenido.");
+  });
+
+  async function cargarRegistros() {
+    if (!db) return;
+    try {
+      const snap = await getDocs(query(collection(db, "registros"), orderBy("creadoEn", "desc")));
+      registros = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      dibujarTabla();
+      $("tablaStatus").textContent = "Conectado. Se cargaron " + registros.length + " registros.";
+    } catch (e) {
+      $("tablaStatus").textContent = "No se pudieron consultar los registros: " + e.message + ". Verifica las reglas de Firestore.";
+    }
+  }
+
+  function dibujarTabla() {
+    const grupo = $("filtroGrupo").value.trim().toLowerCase();
+    const busqueda = $("filtroMatricula").value.trim().toLowerCase();
+    const filtrados = registros.filter(r =>
+      (!grupo || String(r.grupo || "").toLowerCase().includes(grupo)) &&
+      (!busqueda || String(r.nombre || "").toLowerCase().includes(busqueda) ||
+        String(r.matricula || "").toLowerCase().includes(busqueda))
+    );
+    $("contador").textContent = "Registros: " + filtrados.length + " de " + registros.length;
+    const tbody = $("tbody");
+    tbody.innerHTML = "";
+    if (!filtrados.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td"); td.colSpan = 6; td.textContent = "No hay registros que coincidan.";
+      tr.appendChild(td); tbody.appendChild(tr); return;
+    }
+    for (const r of filtrados) {
+      const tr = document.createElement("tr");
+      for (const val of [r.nombre, r.grupo, r.matricula, r.fecha, r.hora, r.tipo]) {
+        const td = document.createElement("td");
+        td.textContent = val ?? "";
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  }
+  $("filtroGrupo").addEventListener("input", dibujarTabla);
+  $("filtroMatricula").addEventListener("input", dibujarTabla);
+  $("btnActualizar").addEventListener("click", cargarRegistros);
+  $("btnExcel").addEventListener("click", () => {
+    const grupo = $("filtroGrupo").value.trim().toLowerCase();
+    const busqueda = $("filtroMatricula").value.trim().toLowerCase();
+    const filtrados = registros.filter(r =>
+      (!grupo || String(r.grupo || "").toLowerCase().includes(grupo)) &&
+      (!busqueda || String(r.nombre || "").toLowerCase().includes(busqueda) ||
+        String(r.matricula || "").toLowerCase().includes(busqueda))
+    ).map(({nombre,grupo,matricula,fecha,hora,tipo}) => ({
+      Nombre: nombre || "", Grupo: grupo || "", Matrícula: matricula || "",
+      Fecha: fecha || "", Hora: hora || "", Tipo: tipo || ""
+    }));
+    if (!filtrados.length) return mostrarEstado("tablaStatus", "No hay registros para exportar.", true);
+    const ws = XLSX.utils.json_to_sheet(filtrados);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Registros");
+    XLSX.writeFile(wb, "registros_qr.xlsx");
+  });
+</script>
+</body>
+</html>
