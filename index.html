@@ -62,8 +62,17 @@
         <button id="btnGenerar">Generar QR</button>
         <button class="secondary" id="btnGuardarPersona">Guardar persona</button>
       </div>
-      <div id="qrcode" aria-label="Código QR generado"></div>
-      <div id="qrTexto" class="muted"></div>
+     <div id="qrcode" aria-label="Código QR generado"></div>
+<div id="qrTexto" class="muted"></div>
+
+<div class="actions no-print">
+  <button id="btnDescargarPNG" class="secondary" disabled>
+    Descargar QR en PNG
+  </button>
+  <button id="btnDescargarJPG" class="secondary" disabled>
+    Descargar QR en JPG
+  </button>
+</div>
       <div id="personaStatus" class="status" role="status">Configura Firebase y captura los datos para comenzar.</div>
     </section>
 
@@ -179,15 +188,90 @@
   function payloadQR(matricula) { return "MATRICULA:" + matricula; }
 
   $("btnGenerar").addEventListener("click", () => {
+    
+function descargarQR(formato) {
+  const contenedor = $("qrcode");
+  const canvas = contenedor.querySelector("canvas");
+  const imagen = contenedor.querySelector("img");
+
+  if (!canvas && !imagen) {
+    mostrarEstado(
+      "personaStatus",
+      "Primero debes generar un código QR.",
+      true
+    );
+    return;
+  }
+
+  const descargar = (fuente) => {
+    const lienzo = document.createElement("canvas");
+    const margen = 20;
+    lienzo.width = fuente.width + margen * 2;
+    lienzo.height = fuente.height + margen * 2;
+
+    const contexto = lienzo.getContext("2d");
+    contexto.fillStyle = "#ffffff";
+    contexto.fillRect(0, 0, lienzo.width, lienzo.height);
+    contexto.drawImage(fuente, margen, margen);
+
+    const extension = formato === "jpeg" ? "jpg" : "png";
+    const enlace = document.createElement("a");
+    enlace.download =
+      "QR_" + ($("matricula").value.trim() || "persona") +
+      "." + extension;
+
+    enlace.href = lienzo.toDataURL(
+      formato === "jpeg" ? "image/jpeg" : "image/png",
+      1
+    );
+
+    enlace.click();
+    mostrarEstado(
+      "personaStatus",
+      "Código QR descargado en formato " + extension.toUpperCase() + "."
+    );
+  };
+
+  if (canvas) {
+    descargar(canvas);
+  } else {
+    const img = new Image();
+    img.onload = () => descargar(img);
+    img.onerror = () => mostrarEstado(
+      "personaStatus",
+      "No se pudo preparar la imagen del QR.",
+      true
+    );
+    img.src = imagen.src;
+  }
+}
+
+$("btnDescargarPNG").addEventListener("click", () => {
+  descargarQR("png");
+});
+
+$("btnDescargarJPG").addEventListener("click", () => {
+  descargarQR("jpeg");
+});
+
     const p = validarPersona();
     if (!p) return;
     personaActual = p;
     $("qrcode").innerHTML = "";
+    $("btnDescargarPNG").disabled = true;
+$("btnDescargarJPG").disabled = true;
     new QRCode($("qrcode"), {
       text: payloadQR(p.matricula),
       width: 190, height: 190,
       correctLevel: QRCode.CorrectLevel.M
     });
+
+
+$("btnDescargarPNG").disabled = false;
+$("btnDescargarJPG").disabled = false;
+
+
+    
     $("qrTexto").textContent = "Contenido del QR: " + payloadQR(p.matricula);
     mostrarEstado("personaStatus", "QR generado. Para registrar a la persona en la base de datos, pulsa «Guardar persona».");
   });
